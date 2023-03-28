@@ -20,6 +20,11 @@ You will note that the dates correspond to those that have expenses in the PDF a
 
 *This project computes the cost basis for you.*
 
+(Note to future self: to find the gross proceeds, look on Google for e.g., `iau
+silver trust 2022 gross proceeds file`. iShare provides a spreadsheet; I saved
+and hand-cleaned the file. For `GLD`, I copy-pasted the PDF contents and cleaned
+it up by hand. Takes 5 mins.)
+
 
 # Transactions Input Format
 
