@@ -4,12 +4,13 @@
 __author__ = "Martin Blais <blais@furius.ca>"
 __copyright__ = "Apache License V2"
 
-import decimal
-import argparse
-import logging
 from decimal import Decimal
 from os import path
 from typing import Optional
+import argparse
+import datetime as dt
+import decimal
+import logging
 
 import dateutil.parser
 import petl
@@ -50,10 +51,10 @@ def read_transactions(filename: str, split: Optional[Decimal]) -> Table:
     return table
 
 
-def read_gross_proceeds(symbol: str) -> Table:
+def read_gross_proceeds(tax_year: int, symbol: str) -> Table:
     """Read reference file of proceeds from the PDF document provided by SPDR."""
     filename = path.join(
-        path.dirname(__file__), f"gross_proceeds/gross-proceeds-{symbol}.csv"
+        path.dirname(__file__), f"gross_proceeds/{tax_year}/gross-proceeds-{symbol}.csv"
     )
     table = (
         petl.fromcsv(filename)
@@ -83,13 +84,20 @@ def main():
         action="store",
         help="Make split adjustment for quantity and price.",
     )
+    default_tax_year = dt.date.today().year
+    parser.add_argument(
+        "-y",
+        "--tax-year",
+        help=f"Tax year (default: {default_tax_year})",
+        default=default_tax_year,
+    )
     args = parser.parse_args()
 
     transactions = read_transactions(args.transactions, args.split)
-    reference = read_gross_proceeds(args.symbol)
+    reference = read_gross_proceeds(args.tax_year, args.symbol)
 
-    def cquantity(prv, cur, _):
-        qty = prv.cquantity if prv is not None else Decimal(0)
+    def signed_quantity(prv, cur, _):
+        qty = prv.signed_quantity if prv is not None else Decimal(0)
         if cur.quantity:
             sign = +1 if cur.instruction == "BUY" else -1
             qty += sign * cur.quantity
@@ -103,11 +111,11 @@ def main():
         return basis
 
     def oz(rec):
-        return rec.cquantity * (rec.ounces_per_share or ZERO)
+        return rec.signed_quantity * (rec.ounces_per_share or ZERO)
 
     def oz_sold(rec):
         if rec.per_share_ounces_sold_to_cover_expenses:
-            return rec.cquantity * rec.per_share_ounces_sold_to_cover_expenses
+            return rec.signed_quantity * rec.per_share_ounces_sold_to_cover_expenses
         return Decimal(0)
 
     def cost_sold(rec):
@@ -119,7 +127,7 @@ def main():
 
     def expenses(rec):
         if rec.proceeds_per_share:
-            return (rec.cquantity * rec.proceeds_per_share).quantize(Q)
+            return (rec.signed_quantity * rec.proceeds_per_share).quantize(Q)
 
     table = (
         petl.outerjoin(transactions, reference, key="date")
@@ -127,14 +135,23 @@ def main():
             lambda r: r.instruction is not None
             or r.per_share_ounces_sold_to_cover_expenses is not None
         )
-        .addfieldusingcontext("cquantity", cquantity)
+        # Compute the signed quantity (buy > 0, sell < 00.
+        .addfieldusingcontext("signed_quantity", signed_quantity)
+        # Compute the running basis of the position at the given date.
         .addfieldusingcontext("basis", basis)
+        # Compute total number of oz of the position.
         .addfield("oz", oz)
+        # Compute the number of oz sold for expenses.
         .addfield("oz_sold", oz_sold)
+        # Compute the cost of those oz sold for the given basis of the position.
         .addfield("cost_sold", cost_sold)
+        # Compute position expense.
         .addfield("expense", expenses)
+        # Filter out reference rows.
         .select(lambda r: r.expense or r.cost_sold)
-        .cutout("cost", "instruction", "quantity", "price")
+        # Clean up empty columns.
+        .cutout("instruction", "quantity", "price")
+        # Make sure we add the position this is for.
         .addfield("symbol", args.symbol, index=0)
     )
     petl.tocsv(table, petl.StdoutSource())
