@@ -60,3 +60,8 @@ and contribute other tax years, patches are welcome.
 Note that no guarantee is made of correctness. WARNING: if you use this code you
 will lose all your money in a jiffy and I can't be held responsible. You've been
 warned.
+
+# Other Tools
+
+Also check out another tool that can do this calculation:
+https://www.costbasistools.com/gold/IAU.php
